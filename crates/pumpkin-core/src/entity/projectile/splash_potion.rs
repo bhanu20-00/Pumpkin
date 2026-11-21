@@ -2,11 +2,15 @@ use crate::entity::projectile::owner::ProjectileOwner;
 use std::sync::{Arc, RwLock};
 
 use crate::{
+    block::blocks::campfire::CampfireBlock,
     entity::{Entity, EntityBase, projectile::ThrownItemEntity},
     server::Server,
 };
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::{Block, BlockId};
+use pumpkin_data::{
+    Block, BlockId, block_properties::CampfireLikeProperties, game_event::GameEvent,
+    world::WorldEvent,
+};
 use pumpkin_protocol::java::client::play::CWorldEvent;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::math::{boundingbox::BoundingBox, vector2::Vector2};
@@ -106,7 +110,8 @@ pub(crate) fn rehydrate_axolotls_around(
     }
 }
 
-/// Extinguishes fire (including soul fire) at the hit position and its four horizontal neighbors.
+/// Extinguishes fire (including soul fire) and lit campfires at the hit position and its four
+/// horizontal neighbors.
 fn extinguish_fire(world: &Arc<crate::world::World>, hit_pos: Vector3<f64>) {
     let air_state_id = Block::AIR.default_state.id;
 
@@ -124,10 +129,16 @@ fn extinguish_fire(world: &Arc<crate::world::World>, hit_pos: Vector3<f64>) {
             p.y.floor() as i32,
             p.z.floor() as i32,
         ));
-        let state_id = world.get_block_state_id(&pos);
+        let (block, state_id) = world.get_block_and_state_id(&pos);
         let raw_block_id = state_id.to_block_id();
         if raw_block_id == BlockId::FIRE || raw_block_id == BlockId::SOUL_FIRE {
             world.set_block_state(&pos, air_state_id, BlockFlags::NOTIFY_ALL);
+        } else if CampfireBlock::is_lit_campfire(block, state_id) {
+            world.sync_world_event(WorldEvent::SoundExtinguishFire, pos, 0);
+            world.emit_game_event(GameEvent::BlockChange.name(), pos.to_centered_f64());
+            let mut props = CampfireLikeProperties::from_state_id(state_id);
+            props.lit = false;
+            world.set_block_state(&pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
         }
     }
 }
